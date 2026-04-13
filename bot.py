@@ -462,6 +462,17 @@ def main() -> None:
     app.add_handler(CommandHandler("listparents", cmd_listparents))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
 
+    # Catch-all for non-admin messages
+    async def fallback_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not is_admin(update.effective_chat.id):
+            await update.message.reply_text(
+                "This bot is for receiving photos only.\n"
+                "To contact us, please message us on WhatsApp:\n"
+                "https://wa.me/96171147579"
+            )
+
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, fallback_message))
+
     print("Bot is running via webhook...")
     app.run_webhook(
         listen="0.0.0.0",
