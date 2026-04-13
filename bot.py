@@ -16,8 +16,10 @@ from telegram.ext import (
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+PORT = int(os.environ.get("PORT", "8443"))
 PARENTS_FILE = Path("parents.json")
 
 # Conversation states
@@ -395,10 +397,13 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main() -> None:
     if not BOT_TOKEN:
-        print("ERROR: BOT_TOKEN not set in .env file.")
+        print("ERROR: BOT_TOKEN not set.")
         return
     if not ADMIN_CHAT_ID:
-        print("ERROR: ADMIN_CHAT_ID not set in .env file.")
+        print("ERROR: ADMIN_CHAT_ID not set.")
+        return
+    if not WEBHOOK_URL:
+        print("ERROR: WEBHOOK_URL not set.")
         return
 
     app = Application.builder().token(BOT_TOKEN).build()
@@ -452,8 +457,13 @@ def main() -> None:
     app.add_handler(CommandHandler("listparents", cmd_listparents))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
 
-    print("Bot is running...")
-    app.run_polling()
+    print("Bot is running via webhook...")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+        url_path=BOT_TOKEN,
+    )
 
 
 if __name__ == "__main__":
