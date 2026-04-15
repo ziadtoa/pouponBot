@@ -8,6 +8,7 @@ logging.basicConfig(
 )
 
 from dotenv import load_dotenv
+from upstash_redis import Redis
 from telegram import (
     BotCommand,
     BotCommandScopeChat,
@@ -32,7 +33,12 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", "8443"))
-PARENTS_FILE = Path("parents.json")
+UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
+UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+
+redis_client = Redis(url=UPSTASH_REDIS_REST_URL, token=UPSTASH_REDIS_REST_TOKEN) \
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN else None
+PARENTS_HASH = "parents"
 
 # Conversation states
 WAITING_CHILD_NAME = 0
@@ -51,13 +57,18 @@ def next_request_id() -> str:
 
 
 def load_parents() -> dict[str, str]:
-    if PARENTS_FILE.exists():
-        return json.loads(PARENTS_FILE.read_text(encoding="utf-8"))
-    return {}
+    if not redis_client:
+        return {}
+    data = redis_client.hgetall(PARENTS_HASH)
+    return data or {}
 
 
 def save_parents(parents: dict[str, str]) -> None:
-    PARENTS_FILE.write_text(json.dumps(parents, indent=2, ensure_ascii=False), encoding="utf-8")
+    if not redis_client:
+        return
+    redis_client.delete(PARENTS_HASH)
+    if parents:
+        redis_client.hset(PARENTS_HASH, values=parents)
 
 
 def is_admin(chat_id: int) -> bool:
@@ -515,6 +526,9 @@ def main() -> None:
         return
     if not WEBHOOK_URL:
         print("ERROR: WEBHOOK_URL not set.")
+        return
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        print("ERROR: UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set.")
         return
 
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
