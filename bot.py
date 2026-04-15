@@ -297,6 +297,82 @@ async def cmd_sendphoto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return WAITING_SEARCH_NAME
 
 
+async def on_admin_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin uploaded a photo — show Send / Broadcast buttons."""
+    if not is_admin(update.effective_chat.id):
+        return
+
+    photo = update.message.photo[-1]
+    req_id = next_request_id()
+    pending_requests[req_id] = {
+        "photo_id": photo.file_id,
+        "caption": update.message.caption or "",
+    }
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Send to one parent", callback_data=f"photoaction:send:{req_id}"),
+            InlineKeyboardButton("Broadcast to all", callback_data=f"photoaction:broadcast:{req_id}"),
+        ]
+    ])
+    await update.message.reply_text("What do you want to do with this photo?", reply_markup=keyboard)
+
+
+async def handle_photo_action_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Callback entry point: 'Send to one parent' button pressed — enter search flow."""
+    query = update.callback_query
+    await query.answer()
+
+    if not is_admin(query.from_user.id):
+        return ConversationHandler.END
+
+    _, action, req_id = query.data.split(":", 2)
+    req = pending_requests.pop(req_id, None)
+    if not req:
+        await query.edit_message_text("This photo has expired. Please upload again.")
+        return ConversationHandler.END
+
+    context.user_data["pending_photo"] = req["photo_id"]
+    context.user_data["pending_caption"] = req["caption"]
+
+    await query.edit_message_text("Type the child's name (or part of it) to search:")
+    return WAITING_SEARCH_NAME
+
+
+async def handle_photo_action_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback: 'Broadcast to all' button pressed — send to all parents immediately."""
+    query = update.callback_query
+    await query.answer()
+
+    if not is_admin(query.from_user.id):
+        return
+
+    _, action, req_id = query.data.split(":", 2)
+    req = pending_requests.pop(req_id, None)
+    if not req:
+        await query.edit_message_text("This photo has expired. Please upload again.")
+        return
+
+    parents = load_parents()
+    if not parents:
+        await query.edit_message_text("No parents registered.")
+        return
+
+    photo_id = req["photo_id"]
+    caption = req["caption"]
+    success, failed = 0, 0
+    for parent_id in parents:
+        try:
+            await context.bot.send_photo(
+                chat_id=int(parent_id), photo=photo_id, caption=caption
+            )
+            success += 1
+        except Exception:
+            failed += 1
+
+    await query.edit_message_text(f"Broadcast complete: {success} sent, {failed} failed.")
+
+
 async def receive_search_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Search parents by child name and show buttons."""
     query = update.message.text.strip().lower()
@@ -455,9 +531,12 @@ def main() -> None:
     )
     app.add_handler(register_conv)
 
-    # Sendphoto conversation: /sendphoto (reply to photo) → search name → pick button
+    # Sendphoto conversation: entry via /sendphoto OR the "Send to one parent" button
     sendphoto_conv = ConversationHandler(
-        entry_points=[CommandHandler("sendphoto", cmd_sendphoto)],
+        entry_points=[
+            CommandHandler("sendphoto", cmd_sendphoto),
+            CallbackQueryHandler(handle_photo_action_send, pattern=r"^photoaction:send:"),
+        ],
         states={
             WAITING_SEARCH_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_search_name)],
         },
@@ -466,6 +545,12 @@ def main() -> None:
         per_message=False,
     )
     app.add_handler(sendphoto_conv)
+
+    # Broadcast action callback (outside conversation)
+    app.add_handler(CallbackQueryHandler(handle_photo_action_broadcast, pattern=r"^photoaction:broadcast:"))
+
+    # Admin photo upload — show Send/Broadcast buttons
+    app.add_handler(MessageHandler(filters.PHOTO, on_admin_photo))
 
     # Removeparent conversation: /removeparent → search name → pick button
     remove_conv = ConversationHandler(
@@ -501,7 +586,7 @@ def main() -> None:
                 "https://wa.me/96171147579"
             )
 
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, fallback_message))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.PHOTO, fallback_message))
 
     print("Bot is running via webhook...")
     app.run_webhook(
