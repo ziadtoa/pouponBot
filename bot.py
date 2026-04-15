@@ -8,7 +8,14 @@ logging.basicConfig(
 )
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -400,6 +407,29 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # --------------- Main ---------------
 
+async def post_init(application: Application) -> None:
+    """Set scoped command menus: minimal for parents, full for admin."""
+    parent_commands = [
+        BotCommand("register", "Register for photos"),
+        BotCommand("myid", "Show your chat ID"),
+    ]
+    admin_commands = [
+        BotCommand("register", "Register for photos"),
+        BotCommand("myid", "Show your chat ID"),
+        BotCommand("addparent", "Add a parent manually"),
+        BotCommand("listparents", "List all registered parents"),
+        BotCommand("removeparent", "Remove a parent"),
+        BotCommand("sendphoto", "Send a photo to one parent"),
+        BotCommand("broadcast", "Send a photo to all parents"),
+    ]
+    await application.bot.set_my_commands(
+        parent_commands, scope=BotCommandScopeDefault()
+    )
+    await application.bot.set_my_commands(
+        admin_commands, scope=BotCommandScopeChat(chat_id=ADMIN_CHAT_ID)
+    )
+
+
 def main() -> None:
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN not set.")
@@ -411,7 +441,7 @@ def main() -> None:
         print("ERROR: WEBHOOK_URL not set.")
         return
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
     # Registration conversation: /register → asks for name → sends to admin
     register_conv = ConversationHandler(
