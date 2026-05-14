@@ -30,7 +30,10 @@ from telegram.ext import (
 load_dotenv()
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
+# Support multiple admins: comma-separated list, e.g. "526077572,123456789"
+# Falls back to single ADMIN_CHAT_ID for backward compatibility
+_admin_ids_raw = os.environ.get("ADMIN_CHAT_IDS", "") or os.environ.get("ADMIN_CHAT_ID", "")
+ADMIN_CHAT_IDS: set[int] = {int(x.strip()) for x in _admin_ids_raw.split(",") if x.strip()}
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", "8443"))
 UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
@@ -72,7 +75,7 @@ def save_parents(parents: dict[str, str]) -> None:
 
 
 def is_admin(chat_id: int) -> bool:
-    return chat_id == ADMIN_CHAT_ID
+    return chat_id in ADMIN_CHAT_IDS
 
 
 # --------------- Parent commands ---------------
@@ -100,15 +103,19 @@ async def receive_child_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
     ])
 
-    await context.bot.send_message(
-        chat_id=ADMIN_CHAT_ID,
-        text=(
-            f"New registration request:\n"
-            f"Parent: {display} (ID: {chat_id})\n"
-            f"Child: {child_name}"
-        ),
-        reply_markup=keyboard,
-    )
+    for admin_id in ADMIN_CHAT_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    f"New registration request:\n"
+                    f"Parent: {display} (ID: {chat_id})\n"
+                    f"Child: {child_name}"
+                ),
+                reply_markup=keyboard,
+            )
+        except Exception:
+            pass
     await update.message.reply_text(
         "Your registration request has been sent. You'll be notified once approved!"
     )
@@ -154,7 +161,7 @@ async def handle_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         except Exception:
             await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
+                chat_id=query.from_user.id,
                 text="(Could not notify the parent — they may need to start the bot first.)",
             )
     else:
@@ -512,17 +519,21 @@ async def post_init(application: Application) -> None:
     await application.bot.set_my_commands(
         parent_commands, scope=BotCommandScopeDefault()
     )
-    await application.bot.set_my_commands(
-        admin_commands, scope=BotCommandScopeChat(chat_id=ADMIN_CHAT_ID)
-    )
+    for admin_id in ADMIN_CHAT_IDS:
+        try:
+            await application.bot.set_my_commands(
+                admin_commands, scope=BotCommandScopeChat(chat_id=admin_id)
+            )
+        except Exception:
+            pass
 
 
 def main() -> None:
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN not set.")
         return
-    if not ADMIN_CHAT_ID:
-        print("ERROR: ADMIN_CHAT_ID not set.")
+    if not ADMIN_CHAT_IDS:
+        print("ERROR: ADMIN_CHAT_IDS (or ADMIN_CHAT_ID) not set.")
         return
     if not WEBHOOK_URL:
         print("ERROR: WEBHOOK_URL not set.")
