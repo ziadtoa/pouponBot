@@ -608,7 +608,7 @@ def main() -> None:
             await update.message.reply_text(
                 "This bot is for receiving photos only.\n"
                 "To contact us, please message us on WhatsApp:\n"
-                "https://wa.me/96171147579"
+                "https://wa.me/9613125050"
             )
 
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND & ~filters.PHOTO, fallback_message))
